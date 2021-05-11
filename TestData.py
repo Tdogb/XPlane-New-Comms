@@ -2,7 +2,7 @@ import enum
 from torch._C import dtype
 from torch.utils.data.dataloader import DataLoader
 import xpc
-import sys, threading, time, math, random
+import sys, threading, time, math, random, itertools
 from numpy.lib.function_base import append
 import numpy as np
 import torch
@@ -18,17 +18,36 @@ class Net(nn.Module):
     def __init__(self):
         super(Net,self).__init__()
         self.relu0 = nn.ReLU()
-        self.l0 = nn.Linear(12,128)
-        self.l1 = nn.Linear(128,128)
-        self.l2 = nn.Linear(128,10)
+        self.l0 = nn.Linear(12,200)
+        self.l1 = nn.Linear(200,200)
+        self.l2 = nn.Linear(200,6)
 
     def forward(self, x):
         A = self.relu0(self.l0(x))
         B = self.relu0(self.l1(A))
         C = self.l2(B)
         return C
+
+class Nominal(nn.Module):
+    def __init__(self, input_size=12, hidden_layer_size=200, state_size=7):
+        super().__init__()
+        torch.manual_seed(0)
+        self.hidden_layer_size = hidden_layer_size
+
+        self.lstm = nn.LSTM(input_size, hidden_layer_size, batch_first=True)
+
+        self.linearStates = nn.Linear(hidden_layer_size, state_size)
+
+    def forward(self, input_seq):
+        self.hidden_cell = (torch.zeros(1, input_seq.shape[0], self.hidden_layer_size),
+                            torch.zeros(1, input_seq.shape[0], self.hidden_layer_size))
+        lstm_out, self.hidden_cell = self.lstm(input_seq, self.hidden_cell)
+        predictionStates = self.linearStates(lstm_out)
+
+        return predictionStates
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-net = Net()
+net = Net()#.cuda()
 # net.to(device)
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 criterion = nn.MSELoss()
@@ -37,14 +56,18 @@ inputs = []
 outputs = []
 
 def readCSVs():
-    with open('D:\Documents\VScode\XPlane-Inputs.csv', 'r', newline='') as csvfile:
+    with open('D:\Documents\VScode\Core Lab\XPlane Sim\XPlane-Inputs-2.csv', 'r', newline='') as csvfile:
         reader = csv.reader(csvfile, delimiter=',', quotechar='|')
         for row in reader:
             inputs.append(list(map(float,row)))
-    with open('D:\Documents\VScode\XPlane-Outputs.csv', 'r', newline='') as csvfile:
+    with open('D:\Documents\VScode\Core Lab\XPlane Sim\XPlane-Outputs-2.csv', 'r', newline='') as csvfile:
         reader = csv.reader(csvfile, delimiter=',', quotechar='|')
+        # ignoreIdxs = [0,1,8,9]
+        ignoreIdxs = [0,0,1,1,1,1,1,1,0,0]
         for row in reader:
-            outputs.append(list(map(float,row)))
+            rw = itertools.compress(row, ignoreIdxs)
+            outputs.append(list(map(float,rw)))
+            
 # fig = plt.figure()
 # ax1 = fig.add_subplot(1,1,1)
 
@@ -54,14 +77,17 @@ def train():
     x_train_t, x_test_t, y_train_t, y_test_t = train_test_split(inputs, outputs, train_size=0.9)
     print(x_train_t[0])
     dataset = TensorDataset(torch.FloatTensor(x_train_t), torch.FloatTensor(y_train_t))
-    dataloader = DataLoader(dataset, batch_size=32, shuffle=True)
+    batch_size = 50
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
     for epoch in range(1,30000):
         for idx, (x,y) in enumerate(dataloader):
             # x = x.to(device)
             # y = y.to(device)
-            x_train = Variable(x).float()
-            y_train = Variable(y).float()
+            x_train = Variable(x).float()#.cuda()
+            y_train = Variable(y).float()#.cuda()
             optimizer.zero_grad()
+            # net.hidden_cell = (torch.zeros(1, batch_size, net.hidden_layer_size),
+            #                      torch.zeros(1, batch_size, net.hidden_layer_size),)
             y_pred = net(x_train)
             loss = criterion(y_pred, y_train)
             losses.append(loss.item())
@@ -101,7 +127,7 @@ def test(x_test, y_test):
         print("i:", idx, " real: ", y_test_i, " pred: ", y_pred)
         print(loss.item())
     return losses_test
-
-readCSVs()
-train()
-nn()
+if __name__ == "__main__":
+    readCSVs()
+    # train()
+    nn()

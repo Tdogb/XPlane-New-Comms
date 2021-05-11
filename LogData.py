@@ -11,7 +11,7 @@ posi_raw = []
 controls_raw = []
 
 
-SET_NUM_DATAPOINTS = 1000
+SET_NUM_DATAPOINTS = 10000
 STARTING_INDEX = 30
 
 def monitor():
@@ -56,6 +56,11 @@ Input
 - 
 - Change in elevation only
 - Change in heading only
+
+NEW:
+    OUTPUT IS NOW change in velocities ONLY. No change in roll/pitch/yaw and no change in elevation
+    
+
 '''
 def writeInputStates():
     indexOffset = 0 #Used to correct for indicies, shouldn't be changed after this is found
