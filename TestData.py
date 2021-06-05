@@ -18,9 +18,9 @@ class Net(nn.Module):
     def __init__(self):
         super(Net,self).__init__()
         self.relu0 = nn.ReLU()
-        self.l0 = nn.Linear(12,200)
-        self.l1 = nn.Linear(200,200)
-        self.l2 = nn.Linear(200,6)
+        self.l0 = nn.Linear(10,128)
+        self.l1 = nn.Linear(128,64)
+        self.l2 = nn.Linear(64,6)
 
     def forward(self, x):
         A = self.relu0(self.l0(x))
@@ -47,8 +47,9 @@ class Nominal(nn.Module):
         return predictionStates
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(device)
 net = Net()#.cuda()
-# net.to(device)
+net.to(device)
 optimizer = optim.Adam(net.parameters(), lr=0.001)
 criterion = nn.MSELoss()
 
@@ -58,12 +59,14 @@ outputs = []
 def readCSVs():
     with open('D:\Documents\VScode\Core Lab\XPlane Sim\XPlane-Inputs-2.csv', 'r', newline='') as csvfile:
         reader = csv.reader(csvfile, delimiter=',', quotechar='|')
+        ignoreIdxs = [1,1,1,1,1,1,1,1,1,0,0,1]
         for row in reader:
+            rw = itertools.compress(row, ignoreIdxs)
             inputs.append(list(map(float,row)))
     with open('D:\Documents\VScode\Core Lab\XPlane Sim\XPlane-Outputs-2.csv', 'r', newline='') as csvfile:
         reader = csv.reader(csvfile, delimiter=',', quotechar='|')
         # ignoreIdxs = [0,1,8,9]
-        ignoreIdxs = [0,0,1,1,1,1,1,1,0,0]
+        ignoreIdxs = [1,1,1,1,0,0,0,1,1,0] # ignoreIdxs = [0,0,1,1,1,0,0,1,0,0]
         for row in reader:
             rw = itertools.compress(row, ignoreIdxs)
             outputs.append(list(map(float,rw)))
@@ -74,17 +77,23 @@ def readCSVs():
 def train():
     net.train()
     losses = []
-    x_train_t, x_test_t, y_train_t, y_test_t = train_test_split(inputs, outputs, train_size=0.9)
-    print(x_train_t[0])
+    validation_losses = []
+    validationZeroCounter = 0
+    validation_loss = 0
+    previousValidationLoss = 999999
+    validation_diff = 0
+    x_train_t, x_test_t, y_train_t, y_test_t = train_test_split(inputs, outputs, train_size=0.8)
     dataset = TensorDataset(torch.FloatTensor(x_train_t), torch.FloatTensor(y_train_t))
     batch_size = 50
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-    for epoch in range(1,30000):
+    dataset_validation = TensorDataset(torch.FloatTensor(x_test_t), torch.FloatTensor(y_test_t))
+    dataloader_validation = DataLoader(dataset_validation, batch_size=1, shuffle=True)
+    for epoch in range(1,37500):
         for idx, (x,y) in enumerate(dataloader):
             # x = x.to(device)
             # y = y.to(device)
-            x_train = Variable(x).float()#.cuda()
-            y_train = Variable(y).float()#.cuda()
+            x_train = Variable(x).float().to(device)
+            y_train = Variable(y).float().to(device)
             optimizer.zero_grad()
             # net.hidden_cell = (torch.zeros(1, batch_size, net.hidden_layer_size),
             #                      torch.zeros(1, batch_size, net.hidden_layer_size),)
@@ -93,9 +102,29 @@ def train():
             losses.append(loss.item())
             loss.backward()
             optimizer.step()
-        if epoch % 10:
-            print(np.mean(losses[-10:]))
-    torch.save(net.state_dict(), "nn_output")
+        if epoch % 100 == 0:
+            validation_losses = []
+            for idx, (x,y) in enumerate(dataset_validation):
+                x_test_i = Variable(x).float().to(device)
+                y_test_i = Variable(y).float().to(device)
+                y_pred = net(x_test_i)
+                loss = criterion(y_test_i, y_pred)
+                validation_losses.append(loss.item())
+            validation_loss = np.mean(validation_losses)
+            if previousValidationLoss - validation_loss == 0:
+                print(validationZeroCounter)
+                print(type(validationZeroCounter))
+                validationZeroCounter += 1
+                if validationZeroCounter == 50:
+                    torch.save(net.state_dict(), "D:\Documents\VScode\Core Lab\XPlane Sim\\nn_output")
+                    input()
+                    break
+            else:
+                validationZeroCounter = 0
+            validation_diff = previousValidationLoss - validation_loss
+            previousValidationLoss = validation_loss
+        print("Epoch: ", epoch, "Loss", np.mean(losses[-160:]), "Validation loss change", validation_diff)
+    torch.save(net.state_dict(), "D:\Documents\VScode\Core Lab\XPlane Sim\\nn_output")
     return losses, x_test_t, y_test_t
 
 def nn():
@@ -104,13 +133,10 @@ def nn():
     losses, x_test, y_test = train()
     fig, axs = plt.subplots(3)
     axs[0].plot(range(0, len(losses)), losses)
-    # axs[0].set_title("Training loss")
     new = losses[500:len(losses)-1]
     axs[1].plot(range(0, len(new)), new)
-    # axs[1].set_title("zoomed in training loss")
-    losses_test = test(x_test, y_test)
-    axs[2].plot(range(0, len(losses_test)), losses_test)
-    # axs[2].set_title("Testing Loss")
+    # losses_test = test(x_test, y_test)
+    # axs[2].plot(range(0, len(losses_test)), losses_test)
     plt.show()
 
 def test(x_test, y_test):
@@ -119,8 +145,8 @@ def test(x_test, y_test):
     dataset = TensorDataset(torch.FloatTensor(x_test), torch.FloatTensor(y_test))
     dataloader = DataLoader(dataset, batch_size=1, shuffle=True)
     for idx, (x,y) in enumerate(dataset):
-        x_test_i = Variable(x).float()
-        y_test_i = Variable(y).float()
+        x_test_i = Variable(x).float().to(device)
+        y_test_i = Variable(y).float().to(device)
         y_pred = net(x_test_i)
         loss = criterion(y_test_i, y_pred)
         losses_test.append(loss.item())
@@ -129,5 +155,4 @@ def test(x_test, y_test):
     return losses_test
 if __name__ == "__main__":
     readCSVs()
-    # train()
     nn()
